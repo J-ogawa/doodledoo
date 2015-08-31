@@ -5,6 +5,7 @@
 ;; no claim is made of best practices - feedback welcome
 
 (ns om-sente.server
+  (:gen-class)
   (:require [clojure.core.async :as async
              :refer [<! <!! chan go go-loop thread]]
             [clojure.core.cache :as cache]
@@ -121,6 +122,17 @@
     (start-broadcaster! (clojure.string/reverse msg))))
     ;(chsk-send! uid [:test/reply (clojure.string/reverse msg)])))
 
+(defmethod handle-event :test/change-data
+  [[_ msg] req]
+  (when-let [uid (session-uid req)]
+    (keep-alive uid)
+    (println "~~~~~~~")
+    (println @connected-uids)
+    (println ";;;;;;;")
+    ;(chsk-send! uid [:test/reply msg])
+    ;(Thread/sleep 3000)
+    (start-broadcaster! msg)))
+    ;(chsk-send! uid [:test/reply (clojure.string/reverse msg)])))
 
 ;; When the client pings us, send back the session state:
 

@@ -14,11 +14,13 @@
                  [ring/ring-core "1.3.1"]
                  [jetty/javax.servlet "5.1.12"]]
 
-  :plugins [[lein-cljsbuild "1.0.3"]] ;; 1.0.3
+  :main om-sente.server
+
+  :plugins [[lein-cljsbuild "1.0.3"]]
 
   :source-paths ["src/clj"]
 
-  :cljsbuild { 
+  :cljsbuild {
     :builds [{:id "om-sente"
               :source-paths ["src/cljs"]
               :compiler {

@@ -10,9 +10,9 @@
             [om.dom :as dom :include-macros true]
             [sablono.core :as html :refer-macros [html]]
             [taoensso.sente :as s]
-            [cljs.core.async :as async :refer [<! >! chan]]))
+            [cljs.core.async :as async :refer [<! >! chan put!]]))
 
-#_(enable-console-print!)
+(enable-console-print!)
 
 (let [{:keys [chsk ch-recv send-fn state]}
       (s/make-channel-socket! "/ws" {:type :auto})]
@@ -39,12 +39,12 @@
   (reify
     om/IInitState
     (init-state [this]
-                {:text ""})
+      {:text ""})
     om/IRenderState
     (render-state [this state]
-                  (html [:input {:type "text" :value (:text state) :size text-length :max-length text-length
-                                 :on-change #(field-change % owner :text)
-                                 :on-key-press #(send-text-on-enter % owner state)}]))))
+      (html [:input {:type "text" :value (:text state) :size text-length :max-length text-length
+                     :on-change #(field-change % owner :text)
+                     :on-key-press #(send-text-on-enter % owner state)}]))))
 
 (defn make-color [v]
   (let [r v
@@ -56,53 +56,13 @@
 (defn make-target [s]
   (take text-length (concat (map #(.charCodeAt %) s) (repeat 0))))
 
-(def animation-tick 75)
-(def animation-factor 15)
-(def graph-scale 3)
-(def graph-bar-width 30)
-(def graph-height 400)
-(def bar-gap 1)
-
-(defn animated-bar-graph [app owner]
-  (reify
-    om/IWillMount
-    (will-mount [this]
-                (js/setTimeout (fn tick []
-                                 (let [target-data (make-target (:data/text @app))
-                                       next-data   (or (om/get-state owner :data) (vec (take text-length (repeat 0))))]
-                                   (om/set-state! owner :data
-                                                  (mapv (fn [d y]
-                                                          (if (< d y)
-                                                            (min y (+ (/ y animation-factor) d))
-                                                            (max y (- d (max animation-factor (/ d animation-factor))))))
-                                                        next-data
-                                                        target-data))
-                                   (js/setTimeout tick animation-tick)))
-                               animation-tick))
-    om/IRenderState
-    (render-state [this {:keys [data]}]
-                  (let [s (:data/text app)
-                        t (make-target s)]
-                    (html [:div {:style {:height (+ 100 graph-height)}}
-                           [:p (str "The string '" s "' represented as a bar chart:")]
-                           (into [:svg {:id "display" :width "100%" :height graph-height}]
-                                 (map (fn [v1 v2 o]
-                                        (let [h (* graph-scale v1)]
-                                          [:rect {:fill (make-color (max v1 v2))
-                                                  :width graph-bar-width
-                                                  :height h
-                                                  :x (* (+ bar-gap graph-bar-width) o)
-                                                  :y (- graph-height h)}]))
-                                      data
-                                      t
-                                      (range)))])))))
-
 (defmulti handle-event
   (fn [[ev-id ev-arg] app owner] ev-id))
 
 (defmethod handle-event :test/reply
   [[_ msg] app owner]
-  (om/update! app :data/text msg))
+  (println "receive test/reply")
+  (om/update! app :tttt msg))
 
 (defmethod handle-event :session/state
   [[_ state] app owner]
@@ -119,7 +79,6 @@
 (defmethod handle-event :default
   [event app owner]
   #_(println "UNKNOWN EVENT" event))
-
 
 (defn test-session [owner]
   (chsk-send! [:session/status]))
@@ -144,176 +103,184 @@
   (reify
     om/IInitState
     (init-state [this]
-                {:username "" :password ""})
+      {:username "" :password ""})
     om/IRenderState
     (render-state [this state]
-                  (html [:div {:style {:margin "auto" :width "175"
-                                       :border "solid blue 1px" :padding 20}}
-                         (when-let [error (:notify/error app)]
-                           [:div {:style #js {:color "red"}} error])
-                         [:h1 "Login"]
-                         [:form {:on-submit #(attempt-login % app owner)}
-                          [:div
-                           [:p "Username"]
-                           [:input {:ref "username" :type "text" :value (:username state)
-                                    :on-change #(field-change % owner :username)}]]
-                          [:div
-                           [:p "Password"]
-                           [:input {:ref "password" :type "password" :value (:password state)
-                                    :on-change #(field-change % owner :password)}]]
-                          [:div
-                           [:input {:type "submit" :value "Login"}]]]]))))
-
-(defn line-graph [raw-data]
-  (let [h 380 w 480 m 30
-        d (clj->js raw-data)
-        y-scale (.. js/d3 -scale linear
-                    (domain #js [(apply max raw-data) 0])
-                    (range #js [(+ 0 m) (- h m)]))
-        x-scale (.. js/d3 -scale linear
-                    (domain #js [0 (count raw-data)])
-                    (range #js [(+ 0 m) (- w m)]))
-        svg (.. js/d3 (select "#d3-node") (append "svg")
-                (attr #js {:width w :height h}))
-        g (.. svg (append "g"))
-        l (.. js/d3 -svg line (x (fn [d i] (x-scale i)))
-              (y (fn [d] (y-scale d))))]
-    ;; actual line
-    (.. g (append "path") (attr "d" (l d)))
-    ;; x-axis
-    (.. g (append "line") (attr "x1" (x-scale 0))
-        (attr "y1" (y-scale 0))
-        (attr "x2" (x-scale (count raw-data)))
-        (attr "y2" (y-scale 0)))
-    ;; y-axis
-    (.. g (append "line") (attr "x1" (x-scale 0))
-        (attr "y1" (y-scale 0))
-        (attr "x2" (x-scale 0))
-        (attr "y2" (y-scale (apply max raw-data))))
-    ;; x-label
-    (.. g (selectAll ".xLabel") (data (.ticks x-scale 5))
-        enter (append "text")
-        (attr "class" "xLabel")
-        (text js/String)
-        (attr "x" (fn [d] (x-scale d)))
-        (attr "y" (- h 5))
-        (attr "text-anchor" "middle"))
-    ;; y-label
-    (.. g (selectAll ".yLabel") (data (.ticks y-scale 4))
-        enter (append "text")
-        (attr "class" "yLabel")
-        (text js/String)
-        (attr "x" (/ m 1.5))
-        (attr "y" (fn [d] (y-scale d)))
-        (attr "text-anchor" "end"))
-    ;; x-ticks
-    (.. g (selectAll "xTicks") (data (.ticks x-scale 5))
-        enter (append "line")
-        (attr "class" "xTicks")
-        (attr "x1" (fn [d] (x-scale d)))
-        (attr "y1" (y-scale 0))
-        (attr "x2" (fn [d] (x-scale d)))
-        (attr "y2" (+ (y-scale 0) 5)))
-    ;; y-ticks
-    (.. g (selectAll "yTicks") (data (.ticks y-scale 4))
-        enter (append "line")
-        (attr "class" "yTicks")
-        (attr "x1" (- (x-scale 0) 5))
-        (attr "y1" (fn [d] (y-scale d)))
-        (attr "x2" (x-scale 0))
-        (attr "y2" (fn [d] (y-scale d))))))
+      (html [:div {:style {:margin "auto" :width "175"
+                           :border "solid blue 1px" :padding 20}}
+             (when-let [error (:notify/error app)]
+               [:div {:style #js {:color "red"}} error])
+             [:h1 "Login"]
+             [:form {:on-submit #(attempt-login % app owner)}
+              [:div
+               [:p "Username"]
+               [:input {:ref "username" :type "text" :value (:username state)
+                        :on-change #(field-change % owner :username)}]]
+              [:div
+               [:p "Password"]
+               [:input {:ref "password" :type "password" :value (:password state)
+                        :on-change #(field-change % owner :password)}]]
+              [:div
+               [:input {:type "submit" :value "Login"}]]]]))))
 
 (defn graph-data-changing [old new]
-  (not= (:data/text old) (:data/text new)))
+  (not= old new))
 
 (defn d3-test [app owner]
   (reify
     om/IDidMount
     (did-mount [this]
-               (line-graph (vec (make-target (:data/text app)))))
+      (attendance-graph (:tttt app)))
     om/IDidUpdate
     (did-update [this prev-props prev-state]
-                (when (graph-data-changing prev-props app)
-                  (.remove (.-firstChild (om/get-node owner "d3-node")))
-                  (line-graph (vec (make-target (:data/text app))))))
+     ;   (.remove (.-firstChild (om/get-node owner "d3-node")))
+        (attendance-graph (:tttt app)))
     om/IRender
     (render [this]
-            (dom/div #js {:style #js {:height 400 :float "right" :width "50%"}
-                          :react-key "d3-node" ;; ensure React knows this is non-reusable
-                          :ref "d3-node"       ;; label it so we can retrieve it via get-node
-                          :id "d3-node"}))))   ;; set id so D3 can find it!
+      (dom/div #js {:style #js {:height 400 :float "right" :width "100%"}
+                    :react-key "d3-node" ;; ensure React knows this is non-reusable
+                    :ref "d3-node"       ;; label it so we can retrieve it via get-node
+                    :id "d3-node"}
+               (dom/svg #js {:class "svg" :id "svg-node"})
+               ))))   ;; set id so D3 can find it!
 
-(defn nv-line-graph [raw-data]
-  (let [chart (.. js/nv -models lineChart
-                  (margin #js {:left 100})
-                  (useInteractiveGuideline true)
-                  (transitionDuration 350)
-                  (showLegend true)
-                  (showYAxis true)
-                  (showXAxis true))]
-    (.. chart -xAxis (axisLabel "Character") (tickFormat (.format js/d3 ",r")))
-    (.. chart -yAxis (axisLabel "ASCII") (tickFormat (.format js/d3 ",r")))
-    (.. js/d3 (select "#nv-node svg")
-        (datum #js [
-                    #js {:values (clj->js raw-data)
-                         :key "Text Data"
-                         :color "red"
-                         }
-                    ])
-        (call chart))))
+(defn attendance-graph [raw-data]
+  (let [h 380 w 480 m 30
+        _data (clj->js raw-data)
+        y-scale (.. js/d3 -scale linear
+                    (domain #js [0 (apply max raw-data)])
+                    (range #js [(- h m) (+ 0 m)]))
+        height-scale (.. js/d3 -scale linear
+                    (domain #js [0 (apply max raw-data)])
+                    (range #js [(+ 0 m) (- h m)]))
+        x-scale (.. js/d3 -scale linear
+                    (domain #js [0 (count raw-data)])
+                    (range #js [(+ 0 m) (- w m)]))
+        svg (.. js/d3 (select "#svg-node")
+                (attr #js {:width w :height h}))
+        drag (-> js/d3 .-behavior .drag
+                 (.on "drag" (fn [d]
+                               (this-as this
+                               (println d)
 
-(defn nvd3-test [app owner]
+                               (.. js/d3 (select this)
+                                   (attr "fill" "orange"))
+                             ;  (.. js/d3 (select this)
+                             ;      (attr "y" (.. js/d3 -event -y)))
+                                        (swap! app-state assoc :tttt (assoc (:tttt @app-state) d (/ (.. js/d3 -event -y) 50)))
+                                        (println app-state)
+                                        (chsk-send! [:test/change-data (:tttt @app-state)])
+                                        (println (.. js/d3 -event -y))))))]
+    (.. svg (selectAll "rect")
+        (data _data)
+        (enter)
+        (append "rect"))
+
+    (.. svg (selectAll "rect")
+        (data _data)
+        (attr "x" (fn [d i] (+ (x-scale i) 25)))
+        (attr "y" (y-scale d))
+        (attr "width" (fn [d i] (/ w (count raw-data))))
+        (attr "height" (fn [d i] (height-scale d)))
+        (attr "fill" "blue")
+        (call drag))))
+
+(defn attempt-attend [e app owner]
+  (println e))
+
+(defn attend-form [app owner]
   (reify
-    om/IDidMount
-    (did-mount [this]
-               (nv-line-graph (mapv (fn [a b] {:y a :x b}) (make-target (:data/text app)) (range))))
-    om/IDidUpdate
-    (did-update [this prev-props prev-state]
-                (when (graph-data-changing prev-props app)
-                  ;; no need to remove the SVG node, we can just pour new data into it
-                  (nv-line-graph (mapv (fn [a b] {:y a :x b}) (make-target (:data/text app)) (range)))))
+    om/IInitState
+    (init-state [this]
+      {:start_at "" :end_at ""})
+    om/IRenderState
+    (render-state [this state]
+      (html [:div {:style {:margin "auto"
+                           :border "solid blue 1px" :padding 20}}
+             (when-let [error (:notify/error app)]
+               [:div {:style #js {:color "red"}} error])
+             [:form {:on-submit #(attempt-attend % app owner)}
+              [:div
+               [:p "出勤"]
+               [:input {:ref "start_at" :type "date" :value (:username state)
+                        :on-change #(field-change % owner :username)}]]
+              [:div
+               [:p "退勤"]
+               [:input {:ref "end_at" :type "date" :value (:password state)
+                        :on-change #(field-change % owner :password)}]]
+              [:div
+               [:input {:type "submit" :value "打刻"}]]]]))))
+
+(defn day-row [app owner]
+  (reify
     om/IRender
     (render [this]
-            (dom/div #js {:style #js {:height 400 :float "left" :width "50%"}
-                          :react-key "nv-node"
-                          :id "nv-node"}
-                     ;; add the SVG node once, NVD3 updates the data via transition
-                     (dom/svg nil)))))
+      (html
+        [:tr
+         [:td (:day app)]
+         [:td (:start_at app)]
+         [:td (:end_at app)]]))))
+
+(defn table [app owner]
+  (reify
+    om/IRender
+    (render [this]
+      (html
+        [:table
+         [:tr
+          [:th "出勤日"]
+          [:th "出勤"]
+          [:th "退勤"]]
+         (om/build-all day-row (:attendance app))]))))
 
 (defn secured-application [app owner]
   (reify
     om/IRender
     (render [this]
-            (html [:div {:style {:margin "auto" :width "1000"
-                                 :border "solid blue 1px" :padding 20}}
-                   [:h1 "Test Sente"]
-                   (om/build text-sender app {})
-                   (om/build animated-bar-graph app {})
-                   (om/build d3-test app {})
-                   (om/build nvd3-test app {})
-                   [:div {:style {:clear "both"}}]]))))
+      (html [:div {:style {:margin "auto" :width "1000"
+                           :border "solid blue 1px" :padding 20}}
+             [:h1 "てすと"]
+            ; (om/build attend-form app {})
+            ; (om/build table app {})
+             (om/build d3-test app {})
+             [:div {:style {:clear "both"}}]]))))
 
 (defn application [app owner]
   (reify
     om/IInitState
     (init-state [this]
-                {:session/state :unknown})
+      {:session/state :unknown})
     om/IWillMount
     (will-mount [this]
-                (event-loop app owner))
+      (event-loop app owner))
     om/IRenderState
     (render-state [this state]
-                  (dom/div #js {:style #js {:width "100%"}}
-                           (case (:session/state state)
-                             :secure
-                             (om/build secured-application app {})
-                             :open
-                             (om/build login-form app {})
-                             :unknown
-                             (dom/div nil "Loading..."))))))
+      (dom/div #js {:style #js {:width "100%"}}
+                 (om/build secured-application app {})))))
 
-(def app-state (atom {:data/text "Enter a string and press RETURN!"}))
+;(def app-state (atom {:data/text "Enter a string and press RETURN!"}))
+(def app-state
+  (atom
+    {:tttt [0 1 2 3 4 5 6 7 8 9 10]
+     :attendance [
+                  {:day "2015-08-01" :start_at "10:55" :end_at "21:15"}
+                  {:day "2015-08-02" :start_at "09:45" :end_at "19:15"}
+                  {:day "2015-08-03" :start_at "09:55" :end_at "20:40"}]}))
 
 (om/root application
          app-state
          {:target (. js/document (getElementById "app"))})
+
+(def input-chan
+  (let [c (chan)]
+    (.addEventListener js/document "keydown" #(put! c (.-keyCode %)))
+    c))
+
+(defn main []
+  (go
+    (while true
+      (let [turn (<! input-chan)]
+        (println "event")
+        (om/update! app-state conj :tttt (last (:tttt app-state)))))))
+
+(main)
