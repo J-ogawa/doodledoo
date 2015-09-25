@@ -271,16 +271,16 @@
          app-state
          {:target (. js/document (getElementById "app"))})
 
-(def input-chan
-  (let [c (chan)]
-    (.addEventListener js/document "keydown" #(put! c (.-keyCode %)))
-    c))
-
-(defn main []
-  (go
-    (while true
-      (let [turn (<! input-chan)]
-        (println "event")
-        (om/update! app-state conj :tttt (last (:tttt app-state)))))))
-
-(main)
+;(def input-chan
+;  (let [c (chan)]
+;    (.addEventListener js/document "keydown" #(put! c (.-keyCode %)))
+;    c))
+;
+;(defn main []
+;  (go
+;    (while true
+;      (let [turn (<! input-chan)]
+;        (println "event")
+;        (om/update! app-state conj :tttt (last (:tttt app-state)))))))
+;
+;(main)
